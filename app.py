@@ -19,7 +19,11 @@ import numpy as np
 import streamlit as st
 
 from mc_kernel import (
+    DEFAULT_MKL_BRNG,
+    DEFAULT_NUMPY_BG,
     HAS_MKL_RANDOM,
+    MKL_BRNGS,
+    NUMPY_BIT_GENERATORS,
     SimResult,
     simulate_gbm_default,
     simulate_gbm_mkl,
@@ -116,6 +120,23 @@ n_paths = st.sidebar.select_slider(
 seed = st.sidebar.number_input("Random seed", 0, 2**31 - 1, 42)
 
 st.sidebar.divider()
+st.sidebar.subheader("RNG algorithm")
+numpy_bg_names = list(NUMPY_BIT_GENERATORS)
+numpy_bg = st.sidebar.selectbox(
+    "NumPy BitGenerator",
+    numpy_bg_names,
+    index=numpy_bg_names.index(DEFAULT_NUMPY_BG),
+    help="Algorithm used by numpy.random.Generator on the left panel.",
+)
+mkl_brng = st.sidebar.selectbox(
+    "Intel oneMKL BRNG",
+    MKL_BRNGS,
+    index=MKL_BRNGS.index(DEFAULT_MKL_BRNG),
+    help="VSL Basic Random Number Generator used by mkl_random on the right panel.",
+    disabled=not HAS_MKL_RANDOM,
+)
+
+st.sidebar.divider()
 st.sidebar.subheader("Threading")
 cpu_count = os.cpu_count() or 1
 if HAS_MKL_SERVICE:
@@ -134,8 +155,16 @@ st.sidebar.caption(
 )
 
 # ---------------- Main ----------------
-NUMPY_LABEL = ("1. NumPy built-in RNG", "numpy.random.default_rng()", "#0068C9")
-MKL_LABEL = ("2. Intel oneMKL RNG", "mkl_random.RandomState(brng='SFMT19937')", "#FF8C00")
+NUMPY_LABEL = (
+    "1. NumPy built-in RNG",
+    f"numpy.random.Generator(np.random.{numpy_bg}(seed))",
+    "#0068C9",
+)
+MKL_LABEL = (
+    "2. Intel oneMKL RNG",
+    f"mkl_random.RandomState(seed, brng='{mkl_brng}')",
+    "#FF8C00",
+)
 
 st.title("Monte Carlo Stock Simulation — NumPy vs Intel oneMKL")
 st.caption(
@@ -166,9 +195,15 @@ if start:
         T=float(T), n_steps=int(n_steps), n_paths=int(n_paths), seed=int(seed),
     )
 
-    prog_num = run_phase(panel_left, simulate_gbm_default, kwargs, NUMPY_LABEL, 1)
+    prog_num = run_phase(
+        panel_left, simulate_gbm_default,
+        {**kwargs, "bit_generator": numpy_bg}, NUMPY_LABEL, 1,
+    )
     if HAS_MKL_RANDOM:
-        prog_mkl = run_phase(panel_right, simulate_gbm_mkl, kwargs, MKL_LABEL, mkl_threads)
+        prog_mkl = run_phase(
+            panel_right, simulate_gbm_mkl,
+            {**kwargs, "brng": mkl_brng}, MKL_LABEL, mkl_threads,
+        )
     else:
         prog_mkl = Progress(error="mkl_random not installed", done=True)
         with panel_right.container():
@@ -180,9 +215,9 @@ if start:
         speedup = r_num.elapsed_s / r_mkl.elapsed_s
         result_area.markdown("## Result")
         c1, c2, c3 = result_area.columns(3)
-        c1.metric("NumPy built-in", f"{r_num.elapsed_s:.2f} s",
+        c1.metric(f"NumPy ({numpy_bg})", f"{r_num.elapsed_s:.2f} s",
                   f"{r_num.throughput_samples_per_s/1e6:.1f} M samples/s")
-        c2.metric("Intel oneMKL", f"{r_mkl.elapsed_s:.2f} s",
+        c2.metric(f"Intel oneMKL ({mkl_brng})", f"{r_mkl.elapsed_s:.2f} s",
                   f"{r_mkl.throughput_samples_per_s/1e6:.1f} M samples/s")
         c3.metric("Speedup", f"{speedup:.1f}×", "MKL vs NumPy")
 
