@@ -1,0 +1,5 @@
+numpy>=1.26
+mkl-random>=1.2.4
+mkl-service>=2.4.0
+streamlit>=1.30
+matplotlib>=3.7
