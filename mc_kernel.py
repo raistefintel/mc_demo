@@ -221,6 +221,7 @@ class OptionResult:
     call_bs: float
     put_bs: float
     stats: dict = field(default_factory=dict)
+    z_sample: np.ndarray = field(default_factory=lambda: np.empty(0))
     elapsed_s: float = 0.0
     backend: str = ""
     n_paths: int = 0
@@ -264,10 +265,13 @@ def _european_kernel(
     call_bs, put_bs = black_scholes_price(S0, K, r, sigma, T)
     if progress_cb is not None:
         progress_cb(1, 1, elapsed)
+    # Small subsample retained for viz (convergence + Gaussian overlay).
+    z_sample = Z[: min(50_000, Z.size)].copy()
     return OptionResult(
         call_price=call, put_price=put,
         call_bs=call_bs, put_bs=put_bs,
         stats=gaussian_stats(Z),
+        z_sample=z_sample,
         elapsed_s=elapsed,
         backend=backend,
         n_paths=n_paths,

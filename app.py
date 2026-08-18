@@ -295,23 +295,19 @@ MKL_LABEL = (
     "#FF8C00",
 )
 
-st.title(
-    "European Option Pricing — NumPy vs Intel oneMKL"
-    if IS_OPTION else
-    "Monte Carlo Stock Simulation — NumPy vs Intel oneMKL"
-)
 if IS_OPTION:
+    st.title(f"How fast can this CPU price {int(n_paths):,} options?")
     st.caption(
-        "Monte Carlo European call & put pricing under Black-Scholes. "
-        "MC results are validated against the closed-form Black-Scholes price. "
+        "Same math. Same seed. Same CPU. **Only the RNG differs.** "
+        "Monte Carlo prices are validated against the Black-Scholes closed form. "
         "Mirrors the [Intel oneMKL sample]"
         "(https://github.com/oneapi-src/oneMKL-samples/tree/main/monte_carlo_european_opt)."
     )
 else:
+    st.title(f"How fast can this CPU simulate {int(n_paths):,} stock paths?")
     st.caption(
-        "Identical Geometric Brownian Motion kernel. The two runs execute "
-        "**sequentially** — first with NumPy's built-in RNG (left), then with "
-        "Intel's `mkl_random` (right). The live ticker shows elapsed seconds."
+        "Identical Geometric Brownian Motion kernel. NumPy on the left, "
+        "Intel's `mkl_random` on the right. The live ticker shows elapsed seconds."
     )
 
 scoreboard_placeholder = st.empty()
@@ -373,7 +369,7 @@ if st.session_state.race_pending and IS_OPTION:
         if new_best:
             sb["best_speedup"] = speedup
         _render_scoreboard(scoreboard_placeholder)
-        result_area.markdown("## Results")
+        result_area.markdown("## The race")
 
         c1, c2, c3 = result_area.columns(3)
         c1.metric(f"NumPy ({numpy_bg})", f"{r_num.elapsed_s:.3f} s",
@@ -382,7 +378,7 @@ if st.session_state.race_pending and IS_OPTION:
                   f"{r_mkl.options_per_s/1e6:.1f} M options/s")
         c3.metric("Speedup", f"{speedup:.1f}×", "MKL vs NumPy")
 
-        result_area.markdown("### Correctness vs Black-Scholes closed form")
+        result_area.markdown("### Do both get the same answer?")
         call_bs, put_bs = r_num.call_bs, r_num.put_bs
         # Loose MC tolerance ~5σ over sqrt(n) — comfortably passes for large n.
         tol = 5.0 / float(np.sqrt(int(n_paths)))
@@ -413,10 +409,10 @@ if st.session_state.race_pending and IS_OPTION:
                 f"tolerance = {tol:.4f} (raise n_paths to tighten)"
             )
 
-        result_area.markdown("### Sanity check: Gaussian sample statistics")
+        result_area.markdown("### Do both RNGs sample the same distribution?")
         result_area.caption(
-            "Both RNGs should produce N(0,1) samples with matching statistics — "
-            "confirms mathematical equivalence up to sample noise."
+            "Both RNGs draw N(0,1) samples. Matching moments here (and the "
+            "overlay chart below) prove they're mathematically equivalent."
         )
         stats_table = {
             "Statistic": ["mean (target 0)", "std (target 1)", "min", "max", "skew (target 0)"],
@@ -437,15 +433,79 @@ if st.session_state.race_pending and IS_OPTION:
         }
         result_area.table(stats_table)
 
-        fig, ax = plt.subplots(1, 2, figsize=(12, 4))
-        bar_labels = ["Black-Scholes", f"NumPy\n({numpy_bg})", f"MKL\n({mkl_brng})"]
-        bar_colors = ["black", "#0068C9", "#FF8C00"]
-        ax[0].bar(bar_labels, [call_bs, r_num.call_price, r_mkl.call_price], color=bar_colors)
-        ax[0].set(title="European CALL price", ylabel="Price ($)")
-        ax[0].grid(axis="y", alpha=0.3)
-        ax[1].bar(bar_labels, [put_bs, r_num.put_price, r_mkl.put_price], color=bar_colors)
-        ax[1].set(title="European PUT price", ylabel="Price ($)")
-        ax[1].grid(axis="y", alpha=0.3)
+        result_area.markdown("### At a glance")
+        fig, ax = plt.subplots(2, 2, figsize=(13, 9))
+        labels = [f"NumPy\n({numpy_bg})", f"Intel oneMKL\n({mkl_brng})"]
+        colors = ["#0068C9", "#FF8C00"]
+
+        times = [r_num.elapsed_s, r_mkl.elapsed_s]
+        ax[0, 0].barh(labels, times, color=colors, height=0.55)
+        for i, t in enumerate(times):
+            ax[0, 0].text(t, i, f"  {t:.3f} s", va="center",
+                          fontsize=12, fontweight="bold")
+        ax[0, 0].set_title(f"Wall-clock — MKL finishes {speedup:.1f}× sooner",
+                           fontsize=13, fontweight="bold")
+        ax[0, 0].set_xlabel("seconds")
+        ax[0, 0].invert_yaxis()
+        ax[0, 0].grid(axis="x", alpha=0.3)
+
+        tputs = [r_num.options_per_s / 1e6, r_mkl.options_per_s / 1e6]
+        ax[0, 1].bar(labels, tputs, color=colors, width=0.55)
+        for i, v in enumerate(tputs):
+            ax[0, 1].text(i, v, f"{v:.1f}", ha="center", va="bottom",
+                          fontsize=12, fontweight="bold")
+        ax[0, 1].set_title("Throughput — million options / second",
+                           fontsize=13, fontweight="bold")
+        ax[0, 1].set_ylabel("M opt/s")
+        ax[0, 1].grid(axis="y", alpha=0.3)
+
+        Z_num, Z_mkl = r_num.z_sample, r_mkl.z_sample
+        if Z_num.size and Z_mkl.size:
+            disc = float(np.exp(-r * T))
+            drift = (r - 0.5 * sigma * sigma) * T
+            sig_sqrtT = sigma * float(np.sqrt(T))
+
+            def _running_call(Z):
+                S_T = S0 * np.exp(drift + sig_sqrtT * Z)
+                pay = disc * np.maximum(S_T - K, 0.0)
+                return np.cumsum(pay) / np.arange(1, len(pay) + 1)
+
+            x = np.arange(1, len(Z_num) + 1)
+            ax[1, 0].plot(x, _running_call(Z_num), color=colors[0],
+                          lw=1.5, label=f"NumPy ({numpy_bg})")
+            ax[1, 0].plot(x, _running_call(Z_mkl), color=colors[1],
+                          lw=1.5, label=f"MKL ({mkl_brng})")
+            ax[1, 0].axhline(call_bs, color="black", ls="--", lw=1.2,
+                             label=f"Black-Scholes = ${call_bs:.3f}")
+            ax[1, 0].set_xscale("log")
+            ax[1, 0].set_title(
+                f"MC CALL convergence — first {len(Z_num):,} of "
+                f"{r_mkl.n_paths:,} paths",
+                fontsize=13, fontweight="bold",
+            )
+            ax[1, 0].set_xlabel("paths (log scale)")
+            ax[1, 0].set_ylabel("running MC estimate ($)")
+            ax[1, 0].legend(loc="best", fontsize=9)
+            ax[1, 0].grid(alpha=0.3)
+
+            bins = np.linspace(-4.5, 4.5, 80)
+            ax[1, 1].hist(Z_num, bins=bins, color=colors[0], alpha=0.55,
+                          density=True, label=f"NumPy ({numpy_bg})")
+            ax[1, 1].hist(Z_mkl, bins=bins, color=colors[1], alpha=0.55,
+                          density=True, label=f"MKL ({mkl_brng})")
+            xs = np.linspace(-4.5, 4.5, 200)
+            pdf = np.exp(-0.5 * xs * xs) / np.sqrt(2 * np.pi)
+            ax[1, 1].plot(xs, pdf, color="black", ls="--", lw=1.2,
+                          label="N(0,1)")
+            ax[1, 1].set_title(
+                f"Gaussian samples overlay — first {len(Z_num):,} draws",
+                fontsize=13, fontweight="bold",
+            )
+            ax[1, 1].set_xlabel("Z")
+            ax[1, 1].set_ylabel("density")
+            ax[1, 1].legend(loc="upper left", fontsize=9)
+            ax[1, 1].grid(alpha=0.3)
+
         fig.tight_layout()
         result_area.pyplot(fig)
 
@@ -495,7 +555,7 @@ elif st.session_state.race_pending:
         if new_best:
             sb["best_speedup"] = speedup
         _render_scoreboard(scoreboard_placeholder)
-        result_area.markdown("## Result")
+        result_area.markdown("## The race")
         c1, c2, c3 = result_area.columns(3)
         c1.metric(f"NumPy ({numpy_bg})", f"{r_num.elapsed_s:.2f} s",
                   f"{r_num.throughput_samples_per_s/1e6:.1f} M samples/s")
