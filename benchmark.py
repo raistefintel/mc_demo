@@ -10,7 +10,15 @@ from __future__ import annotations
 import argparse
 import statistics
 
-from mc_kernel import HAS_MKL_RANDOM, simulate_gbm_default, simulate_gbm_mkl
+from mc_kernel import (
+    DEFAULT_MKL_BRNG,
+    DEFAULT_NUMPY_BG,
+    HAS_MKL_RANDOM,
+    MKL_BRNGS,
+    NUMPY_BIT_GENERATORS,
+    simulate_gbm_default,
+    simulate_gbm_mkl,
+)
 
 
 def main() -> None:
@@ -23,6 +31,12 @@ def main() -> None:
     p.add_argument("--sigma", type=float, default=0.25)
     p.add_argument("--T", type=float, default=1.0)
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--numpy-bg", default=DEFAULT_NUMPY_BG,
+                   choices=list(NUMPY_BIT_GENERATORS),
+                   help="NumPy BitGenerator algorithm.")
+    p.add_argument("--mkl-brng", default=DEFAULT_MKL_BRNG,
+                   choices=MKL_BRNGS,
+                   help="Intel oneMKL VSL BRNG algorithm.")
     args = p.parse_args()
 
     common = dict(
@@ -33,28 +47,29 @@ def main() -> None:
 
     print(f"\nGBM Monte Carlo — {args.paths:,} paths × {args.steps} steps "
           f"= {total_samples/1e6:.1f} M samples, {args.repeats} repeats\n")
-    print(f"{'Backend':<32} {'Median (s)':>12} {'Best (s)':>12} {'M samples/s':>14}")
-    print("-" * 72)
+    print(f"{'Backend':<36} {'Median (s)':>12} {'Best (s)':>12} {'M samples/s':>14}")
+    print("-" * 76)
 
-    def run(name, fn):
+    def run(name, fn, extra):
         times = []
-        # Warmup
-        fn(**common)
+        fn(**common, **extra)  # warmup
         for _ in range(args.repeats):
-            r = fn(**common)
+            r = fn(**common, **extra)
             times.append(r.elapsed_s)
         med = statistics.median(times)
         best = min(times)
         tput = total_samples / best / 1e6
-        print(f"{name:<32} {med:>12.3f} {best:>12.3f} {tput:>14.1f}")
+        print(f"{name:<36} {med:>12.3f} {best:>12.3f} {tput:>14.1f}")
         return med
 
-    med_def = run("NumPy default (MT19937)", simulate_gbm_default)
+    med_def = run(f"NumPy Generator ({args.numpy_bg})",
+                  simulate_gbm_default, {"bit_generator": args.numpy_bg})
 
     if HAS_MKL_RANDOM:
-        med_mkl = run("Intel oneMKL VSL (SFMT19937)", simulate_gbm_mkl)
-        print("-" * 72)
-        print(f"\nSpeedup (median):  {med_def / med_mkl:.2f}×  (MKL over default)\n")
+        med_mkl = run(f"Intel oneMKL VSL ({args.mkl_brng})",
+                      simulate_gbm_mkl, {"brng": args.mkl_brng})
+        print("-" * 76)
+        print(f"\nSpeedup (median):  {med_def / med_mkl:.2f}×  (MKL over NumPy)\n")
     else:
         print("\n[!] mkl_random not installed — skipping MKL run.")
         print("    Install with:  pip install mkl-random\n")

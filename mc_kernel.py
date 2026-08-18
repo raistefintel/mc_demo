@@ -4,8 +4,8 @@ Both simulators run the same GBM update:
     S(t+dt) = S(t) * exp((mu - 0.5*sigma^2)*dt + sigma*sqrt(dt) * Z),  Z ~ N(0,1)
 
 The ONLY difference between the two functions is the random number generator:
-  * simulate_gbm_default -> numpy.random.default_rng()  (Mersenne Twister, generic C)
-  * simulate_gbm_mkl     -> mkl_random.RandomState()    (Intel oneMKL VSL, SFMT/MT2203)
+  * simulate_gbm_default -> numpy.random.Generator with a selectable BitGenerator
+  * simulate_gbm_mkl     -> mkl_random.RandomState with a selectable BRNG
 
 Everything else (np.exp, arithmetic) uses whatever NumPy is installed. If NumPy
 itself is Intel-distributed / MKL-linked, np.exp will use MKL VML on top, which
@@ -25,6 +25,31 @@ try:
     HAS_MKL_RANDOM = True
 except ImportError:
     HAS_MKL_RANDOM = False
+
+
+# NumPy bit generators exposed through numpy.random.
+NUMPY_BIT_GENERATORS: dict[str, type] = {
+    "PCG64": np.random.PCG64,
+    "PCG64DXSM": np.random.PCG64DXSM,
+    "MT19937": np.random.MT19937,
+    "SFC64": np.random.SFC64,
+    "Philox": np.random.Philox,
+}
+DEFAULT_NUMPY_BG = "PCG64"
+
+# Intel oneMKL VSL Basic Random Number Generators suitable for Gaussian sampling.
+MKL_BRNGS: list[str] = [
+    "SFMT19937",
+    "MT19937",
+    "MT2203",
+    "MRG32K3A",
+    "PHILOX4X32X10",
+    "MCG59",
+    "MCG31",
+    "R250",
+    "WH",
+]
+DEFAULT_MKL_BRNG = "SFMT19937"
 
 
 @dataclass
@@ -96,13 +121,20 @@ def simulate_gbm_default(
     n_steps: int,
     n_paths: int,
     seed: int = 42,
+    bit_generator: str = DEFAULT_NUMPY_BG,
     progress_cb: Optional[ProgressCallback] = None,
 ) -> SimResult:
-    """GBM Monte Carlo using stock NumPy RNG (Mersenne Twister)."""
-    rng = np.random.default_rng(seed)
+    """GBM Monte Carlo using a NumPy Generator with a selectable BitGenerator."""
+    if bit_generator not in NUMPY_BIT_GENERATORS:
+        raise ValueError(
+            f"Unknown NumPy BitGenerator {bit_generator!r}. "
+            f"Choose one of: {list(NUMPY_BIT_GENERATORS)}"
+        )
+    bg_cls = NUMPY_BIT_GENERATORS[bit_generator]
+    rng = np.random.Generator(bg_cls(seed))
     return _gbm_loop(
         rng_normal=lambda n: rng.standard_normal(n),
-        backend="NumPy default (MT19937)",
+        backend=f"NumPy Generator ({bit_generator})",
         S0=S0, mu=mu, sigma=sigma, T=T,
         n_steps=n_steps, n_paths=n_paths,
         progress_cb=progress_cb,
@@ -117,7 +149,7 @@ def simulate_gbm_mkl(
     n_steps: int,
     n_paths: int,
     seed: int = 42,
-    brng: str = "SFMT19937",
+    brng: str = DEFAULT_MKL_BRNG,
     progress_cb: Optional[ProgressCallback] = None,
 ) -> SimResult:
     """GBM Monte Carlo using Intel oneMKL VSL RNG via mkl_random."""

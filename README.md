@@ -21,6 +21,9 @@ also Intel-distributed (MKL-linked), `np.exp` gains extra VML acceleration on to
 ## Quick start
 
 ```bash
+git clone https://github.com/raistefintel/mc_demo.git
+cd mc_demo
+chmod +x run.sh
 ./run.sh
 ```
 
