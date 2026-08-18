@@ -13,6 +13,7 @@ every ~50 ms while a worker thread crunches numbers in the background.
 from __future__ import annotations
 
 import os
+import statistics
 import threading
 import time
 from dataclasses import dataclass
@@ -44,6 +45,72 @@ except ImportError:
     HAS_MKL_SERVICE = False
 
 st.set_page_config(page_title="Stock MC: NumPy vs Intel MKL", layout="wide")
+
+
+def _init_scoreboard() -> None:
+    if "scoreboard" not in st.session_state:
+        st.session_state.scoreboard = {
+            "rounds": 0,
+            "options_priced": 0,
+            "notional": 0.0,
+            "elapsed_numpy": 0.0,
+            "elapsed_mkl": 0.0,
+            "best_speedup": 0.0,
+            "last_speedups": [],
+        }
+    if "race_pending" not in st.session_state:
+        st.session_state.race_pending = False
+
+
+_init_scoreboard()
+
+
+def _fmt_dollars(x: float) -> str:
+    if x >= 1e9:
+        return f"${x/1e9:,.2f} B"
+    if x >= 1e6:
+        return f"${x/1e6:,.1f} M"
+    if x >= 1e3:
+        return f"${x/1e3:,.0f} K"
+    return f"${x:,.0f}"
+
+
+def _countdown(container, seconds: int = 3) -> None:
+    """Big 3-2-1-GO flash before a race starts."""
+    for i in range(seconds, 0, -1):
+        container.markdown(
+            f"<h1 style='text-align:center;font-size:8rem;margin:0;"
+            f"color:#FF8C00;font-family:monospace'>{i}</h1>",
+            unsafe_allow_html=True,
+        )
+        time.sleep(0.7)
+    container.markdown(
+        "<h1 style='text-align:center;font-size:8rem;margin:0;"
+        "color:#00C853;font-family:monospace'>GO!</h1>",
+        unsafe_allow_html=True,
+    )
+    time.sleep(0.4)
+    container.empty()
+
+
+def _render_scoreboard() -> None:
+    sb = st.session_state.scoreboard
+    if sb["rounds"] == 0:
+        return
+    saved = sb["elapsed_numpy"] - sb["elapsed_mkl"]
+    st.markdown("### Live scoreboard — this booth session")
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Rounds", f"{sb['rounds']}")
+    c2.metric("Options priced", f"{sb['options_priced']/1e6:,.1f} M")
+    c3.metric("Notional priced", _fmt_dollars(sb["notional"]))
+    c4.metric("Best speedup", f"{sb['best_speedup']:.1f}×")
+    rolling = statistics.median(sb["last_speedups"]) if sb["last_speedups"] else 0.0
+    c5.metric("Median speedup (last 5)", f"{rolling:.1f}×")
+    st.caption(
+        f"Wall-clock this session — NumPy: {sb['elapsed_numpy']:.1f} s, "
+        f"MKL: {sb['elapsed_mkl']:.1f} s  ·  "
+        f"MKL saved {saved:.1f} s of compute vs stock NumPy"
+    )
 
 
 # Attribute assignment on a plain dataclass is atomic under CPython's GIL, so
@@ -184,6 +251,21 @@ else:
     st.sidebar.caption(f"Install `mkl-service` for live thread control (using {mkl_threads}).")
 
 st.sidebar.divider()
+st.sidebar.subheader("Booth mode")
+continuous = st.sidebar.checkbox(
+    "Continuous race",
+    value=False,
+    help="Auto-repeat rounds so the scoreboard totals climb continuously.",
+)
+show_countdown_ui = st.sidebar.checkbox("Show 3-2-1 countdown", value=True)
+celebrate = st.sidebar.checkbox("Balloons on new best speedup", value=True)
+if st.sidebar.button("Reset scoreboard"):
+    if "scoreboard" in st.session_state:
+        del st.session_state["scoreboard"]
+    _init_scoreboard()
+    st.rerun()
+
+st.sidebar.divider()
 st.sidebar.caption(
     f"mkl_random: {'✓' if HAS_MKL_RANDOM else '✗'} · "
     f"mkl-service: {'✓' if HAS_MKL_SERVICE else '✗'} · "
@@ -221,10 +303,15 @@ else:
         "Intel's `mkl_random` (right). The live ticker shows elapsed seconds."
     )
 
-start = st.button("▶ Run comparison", type="primary", use_container_width=True)
+_render_scoreboard()
+
+start = st.button("▶ Start race", type="primary", use_container_width=True)
+if start:
+    st.session_state.race_pending = True
 
 col_left, col_right = st.columns(2)
 panel_left, panel_right = col_left.empty(), col_right.empty()
+countdown_placeholder = st.empty()
 result_area = st.container()
 
 if not HAS_MKL_RANDOM:
@@ -237,7 +324,11 @@ with panel_left.container():
 with panel_right.container():
     render_panel(st, MKL_LABEL, idle, int(n_paths), mkl_threads, "idle")
 
-if start and IS_OPTION:
+if st.session_state.race_pending and IS_OPTION:
+    st.session_state.race_pending = False
+    is_looping = st.session_state.pop("is_looping", False)
+    if show_countdown_ui and not is_looping:
+        _countdown(countdown_placeholder, 3)
     kwargs = dict(
         S0=float(S0), K=float(K), r=float(r), sigma=float(sigma), T=float(T),
         n_paths=int(n_paths), seed=int(seed),
@@ -259,6 +350,16 @@ if start and IS_OPTION:
     r_num, r_mkl = prog_num.result, prog_mkl.result
     if r_num and r_mkl:
         speedup = r_num.elapsed_s / r_mkl.elapsed_s
+        sb = st.session_state.scoreboard
+        sb["rounds"] += 1
+        sb["options_priced"] += r_mkl.n_paths
+        sb["notional"] += r_mkl.call_price * r_mkl.n_paths
+        sb["elapsed_numpy"] += r_num.elapsed_s
+        sb["elapsed_mkl"] += r_mkl.elapsed_s
+        sb["last_speedups"] = (sb["last_speedups"] + [speedup])[-5:]
+        new_best = speedup > sb["best_speedup"]
+        if new_best:
+            sb["best_speedup"] = speedup
         result_area.markdown("## Results")
 
         c1, c2, c3 = result_area.columns(3)
@@ -334,11 +435,23 @@ if start and IS_OPTION:
         ax[1].grid(axis="y", alpha=0.3)
         fig.tight_layout()
         result_area.pyplot(fig)
+
+        if celebrate and new_best and speedup > 3.0:
+            st.balloons()
+        if continuous:
+            st.session_state.race_pending = True
+            st.session_state.is_looping = True
+            time.sleep(1.2)
+            st.rerun()
     elif r_num:
         result_area.error("MKL run did not complete. Install `mkl_random`.")
         result_area.metric(f"NumPy ({numpy_bg})", f"{r_num.elapsed_s:.3f} s")
 
-elif start:
+elif st.session_state.race_pending:
+    st.session_state.race_pending = False
+    is_looping = st.session_state.pop("is_looping", False)
+    if show_countdown_ui and not is_looping:
+        _countdown(countdown_placeholder, 3)
     kwargs = dict(
         S0=float(S0), mu=float(mu), sigma=float(sigma),
         T=float(T), n_steps=int(n_steps), n_paths=int(n_paths), seed=int(seed),
@@ -360,6 +473,14 @@ elif start:
     r_num, r_mkl = prog_num.result, prog_mkl.result
     if r_num and r_mkl:
         speedup = r_num.elapsed_s / r_mkl.elapsed_s
+        sb = st.session_state.scoreboard
+        sb["rounds"] += 1
+        sb["elapsed_numpy"] += r_num.elapsed_s
+        sb["elapsed_mkl"] += r_mkl.elapsed_s
+        sb["last_speedups"] = (sb["last_speedups"] + [speedup])[-5:]
+        new_best = speedup > sb["best_speedup"]
+        if new_best:
+            sb["best_speedup"] = speedup
         result_area.markdown("## Result")
         c1, c2, c3 = result_area.columns(3)
         c1.metric(f"NumPy ({numpy_bg})", f"{r_num.elapsed_s:.2f} s",
@@ -395,6 +516,14 @@ elif start:
         ax[1].legend()
         fig.tight_layout()
         result_area.pyplot(fig)
+
+        if celebrate and new_best and speedup > 3.0:
+            st.balloons()
+        if continuous:
+            st.session_state.race_pending = True
+            st.session_state.is_looping = True
+            time.sleep(1.2)
+            st.rerun()
     elif r_num:
         result_area.error("MKL run did not complete. Install `mkl_random`.")
         result_area.metric(f"NumPy ({numpy_bg})", f"{r_num.elapsed_s:.2f} s")
