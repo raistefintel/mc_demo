@@ -93,24 +93,35 @@ def _countdown(container, seconds: int = 3) -> None:
     container.empty()
 
 
-def _render_scoreboard() -> None:
+def _render_scoreboard(placeholder) -> None:
     sb = st.session_state.scoreboard
-    if sb["rounds"] == 0:
-        return
     saved = sb["elapsed_numpy"] - sb["elapsed_mkl"]
-    st.markdown("### Live scoreboard — this booth session")
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Rounds", f"{sb['rounds']}")
-    c2.metric("Options priced", f"{sb['options_priced']/1e6:,.1f} M")
-    c3.metric("Notional priced", _fmt_dollars(sb["notional"]))
-    c4.metric("Best speedup", f"{sb['best_speedup']:.1f}×")
     rolling = statistics.median(sb["last_speedups"]) if sb["last_speedups"] else 0.0
-    c5.metric("Median speedup (last 5)", f"{rolling:.1f}×")
-    st.caption(
-        f"Wall-clock this session — NumPy: {sb['elapsed_numpy']:.1f} s, "
-        f"MKL: {sb['elapsed_mkl']:.1f} s  ·  "
-        f"MKL saved {saved:.1f} s of compute vs stock NumPy"
-    )
+    with placeholder.container():
+        st.markdown("### Live scoreboard — this booth session")
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Rounds", f"{sb['rounds']}")
+        c2.metric("Options priced", f"{sb['options_priced']/1e6:,.1f} M")
+        c3.metric("Notional priced", _fmt_dollars(sb["notional"]))
+        c4.metric(
+            "Best speedup",
+            f"{sb['best_speedup']:.1f}×" if sb["best_speedup"] > 0 else "—",
+        )
+        c5.metric(
+            "Median speedup (last 5)",
+            f"{rolling:.1f}×" if rolling > 0 else "—",
+        )
+        if sb["rounds"] > 0:
+            st.caption(
+                f"Wall-clock this session — NumPy: {sb['elapsed_numpy']:.1f} s, "
+                f"MKL: {sb['elapsed_mkl']:.1f} s  ·  "
+                f"MKL saved {saved:.1f} s of compute vs stock NumPy"
+            )
+        else:
+            st.caption(
+                "Press ▶ Start race to begin. Toggle Continuous race in the "
+                "sidebar for kiosk mode — totals climb every round."
+            )
 
 
 # Attribute assignment on a plain dataclass is atomic under CPython's GIL, so
@@ -303,7 +314,8 @@ else:
         "Intel's `mkl_random` (right). The live ticker shows elapsed seconds."
     )
 
-_render_scoreboard()
+scoreboard_placeholder = st.empty()
+_render_scoreboard(scoreboard_placeholder)
 
 start = st.button("▶ Start race", type="primary", use_container_width=True)
 if start:
@@ -360,6 +372,7 @@ if st.session_state.race_pending and IS_OPTION:
         new_best = speedup > sb["best_speedup"]
         if new_best:
             sb["best_speedup"] = speedup
+        _render_scoreboard(scoreboard_placeholder)
         result_area.markdown("## Results")
 
         c1, c2, c3 = result_area.columns(3)
@@ -481,6 +494,7 @@ elif st.session_state.race_pending:
         new_best = speedup > sb["best_speedup"]
         if new_best:
             sb["best_speedup"] = speedup
+        _render_scoreboard(scoreboard_placeholder)
         result_area.markdown("## Result")
         c1, c2, c3 = result_area.columns(3)
         c1.metric(f"NumPy ({numpy_bg})", f"{r_num.elapsed_s:.2f} s",
