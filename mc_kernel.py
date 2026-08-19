@@ -99,6 +99,9 @@ def _gbm_loop(
     log_S = np.full(n_paths, np.log(S0), dtype=np.float64)
 
     t0 = time.perf_counter()
+    # Signal kernel start so the UI can align its live clock with our t0.
+    if progress_cb is not None:
+        progress_cb(0, n_steps, 0.0)
     for t in range(1, n_steps + 1):
         Z = rng_normal(n_paths)
         log_S += drift + diffusion * Z
@@ -255,6 +258,9 @@ def _european_kernel(
     progress_cb: Optional[ProgressCallback] = None,
 ) -> OptionResult:
     t0 = time.perf_counter()
+    # Signal kernel start so the UI can align its live clock with our t0.
+    if progress_cb is not None:
+        progress_cb(0, 1, 0.0)
     Z = rng_normal(n_paths)
     S_T = S0 * np.exp((r - 0.5 * sigma * sigma) * T + sigma * np.sqrt(T) * Z)
     disc = math.exp(-r * T)

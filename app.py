@@ -328,6 +328,12 @@ class Progress:
     error: Optional[str] = None
 
     def cb(self, step: int, total: int, elapsed: float) -> None:
+        # step==0 is the kernel's "starting now" signal — align our live clock
+        # with the kernel's t0 so the ticker matches the reported time.
+        if step == 0 and elapsed == 0.0:
+            self.start_time = time.perf_counter()
+            self.total = total
+            return
         self.step, self.total, self.elapsed = step, total, elapsed
 
 
