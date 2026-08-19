@@ -522,10 +522,9 @@ st.markdown(
   <div class="hero-eyebrow">NumPy · same code · Intel oneMKL under the hood</div>
   <div class="hero-title">{hero_title}</div>
   <div class="hero-tagline">
-    Same script. Same seed. Same CPU. Swap <code>numpy.random</code> for
-    <code>mkl_random</code> — an <code>numpy.random.RandomState</code>-compatible
-    drop-in — and the Gaussian sampler routes through Intel oneMKL VSL.
-    No algorithm changes. Out-of-the-box speedup.
+    Same Python code. Same computer. Install one Intel package and the same
+    simulation finishes noticeably faster &mdash; no rewriting, no tuning,
+    no new hardware.
   </div>
 </div>
 """,
