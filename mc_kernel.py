@@ -2,13 +2,13 @@
 
 Workloads:
   * GBM path simulation — full price paths for a fan chart / VaR analysis.
-  * European option pricing — single-batch Gaussian draw, MC price vs Black-Scholes
-    closed form (mirrors the oneMKL sample:
-    https://github.com/oneapi-src/oneMKL-samples/tree/main/monte_carlo_european_opt).
+  * European option pricing — single-batch Gaussian draw, MC price vs
+    Black-Scholes closed form.
 
 The ONLY difference between the two backends is the random number generator:
   * *_default -> numpy.random.Generator with a selectable BitGenerator
-  * *_mkl     -> mkl_random.RandomState with a selectable BRNG
+  * *_mkl     -> mkl_random.RandomState (drop-in replacement routed through
+    Intel oneMKL VSL) with a selectable BRNG
 
 Defaults for both sides are MT19937 — the one algorithm implemented by both
 libraries — so the head-to-head is a fair comparison of implementations. Users
@@ -178,7 +178,7 @@ def value_at_risk(final_prices: np.ndarray, S0: float, confidence: float = 0.95)
 
 
 # ---------------------------------------------------------------------------
-# European option Monte Carlo (matches oneMKL sample structure).
+# European option Monte Carlo.
 # ---------------------------------------------------------------------------
 
 

@@ -1,13 +1,13 @@
-"""Streamlit app: NumPy built-in RNG vs Intel oneMKL RNG.
+"""Streamlit app: stock NumPy RNG vs MKL-accelerated NumPy (mkl_random).
 
 Two workloads:
   * European option pricing (default) — single-batch Gaussian draw with a
-    Black-Scholes reference; mirrors the oneMKL sample.
+    Black-Scholes reference.
   * GBM path simulation — full price paths + VaR.
 
-Runs execute sequentially — NumPy on the left panel, mkl_random on the right —
-so each backend gets exclusive CPU time. A live ticker updates elapsed seconds
-every ~50 ms while a worker thread crunches numbers in the background.
+Runs execute sequentially — stock NumPy on the left panel, mkl_random on the
+right — so each backend gets exclusive CPU time. A live ticker updates elapsed
+seconds every ~50 ms while a worker thread crunches numbers in the background.
 """
 
 from __future__ import annotations
@@ -45,6 +45,142 @@ except ImportError:
     HAS_MKL_SERVICE = False
 
 st.set_page_config(page_title="Stock MC: NumPy vs Intel MKL", layout="wide")
+
+st.markdown(
+    """
+<style>
+.block-container { padding-top: 1.6rem; max-width: 1400px; }
+
+/* Hero card ------------------------------------------------------------- */
+.hero {
+    background: linear-gradient(135deg, #0b1f3a 0%, #0068C9 100%);
+    border-radius: 16px;
+    padding: 1.6rem 2rem 1.7rem;
+    margin: 0 0 1rem;
+    color: #ffffff;
+    box-shadow: 0 6px 24px rgba(0, 32, 80, 0.14);
+}
+.hero-eyebrow {
+    font-size: .72rem; letter-spacing: .2em; text-transform: uppercase;
+    opacity: .78; margin-bottom: .45rem; font-weight: 600;
+}
+.hero-title {
+    font-size: 2.05rem; font-weight: 700; letter-spacing: -0.02em;
+    line-height: 1.15; margin: 0;
+}
+.hero-tagline {
+    margin-top: .65rem; font-size: 1.02rem; opacity: .92;
+    line-height: 1.5; max-width: 920px;
+}
+.hero code {
+    background: rgba(255, 255, 255, 0.16);
+    padding: 1px 6px; border-radius: 4px; font-size: .92em;
+}
+
+/* Session scoreboard ---------------------------------------------------- */
+.scoreboard {
+    background: #0d1117; color: #e6edf3;
+    border: 1px solid #21262d; border-radius: 14px;
+    padding: 1.2rem 1.5rem 1.3rem;
+    margin: .1rem 0 1.2rem;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.10);
+}
+.sb-head {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: .72rem; letter-spacing: .18em; text-transform: uppercase;
+    color: #8b949e; margin-bottom: 1.05rem; font-weight: 600;
+}
+.sb-pill {
+    background: #21262d; color: #e6edf3;
+    padding: .22rem .7rem; border-radius: 999px;
+    font-size: .66rem; letter-spacing: .14em; font-weight: 600;
+}
+.sb-idle {
+    color: #8b949e; font-size: .95rem; line-height: 1.55;
+    padding: .3rem 0 .1rem;
+}
+.sb-idle b { color: #e6edf3; }
+.sb-row {
+    display: flex; align-items: flex-end; gap: 2.4rem;
+    flex-wrap: wrap; margin-bottom: 1.15rem;
+}
+.sb-hero-num {
+    font-size: 3.4rem; font-weight: 800; color: #FF8C00;
+    line-height: 1; letter-spacing: -0.03em;
+}
+.sb-hero-num .sb-x { font-size: 2rem; margin-left: .1rem; opacity: .9; }
+.sb-hero-lbl {
+    color: #8b949e; font-size: .7rem; letter-spacing: .14em;
+    text-transform: uppercase; margin-top: .35rem; font-weight: 600;
+}
+.sb-stat-num {
+    font-size: 1.7rem; font-weight: 700; color: #e6edf3;
+    line-height: 1; letter-spacing: -0.02em;
+}
+.sb-stat-num .sb-unit {
+    font-size: 1rem; color: #8b949e; margin-left: .18rem;
+    font-weight: 500;
+}
+.sb-stat-lbl {
+    color: #8b949e; font-size: .68rem; letter-spacing: .12em;
+    text-transform: uppercase; margin-top: .35rem; font-weight: 600;
+}
+.sb-bar-row {
+    display: flex; align-items: center; gap: .8rem;
+    margin: .38rem 0; font-size: .82rem;
+}
+.sb-bar-label {
+    width: 108px; color: #8b949e; text-align: right;
+    text-transform: uppercase; letter-spacing: .1em;
+    font-size: .68rem; font-weight: 600;
+}
+.sb-bar-track {
+    flex: 1; background: #161b22; border: 1px solid #21262d;
+    border-radius: 6px; height: 18px; overflow: hidden;
+}
+.sb-bar-fill {
+    display: block; height: 100%; border-radius: 5px;
+    transition: width .4s ease;
+}
+.sb-bar-fill.numpy { background: linear-gradient(90deg, #0068C9, #4C9AFF); }
+.sb-bar-fill.mkl   { background: linear-gradient(90deg, #FF8C00, #FFB347); }
+.sb-bar-val {
+    width: 74px; text-align: right; color: #e6edf3;
+    font-weight: 600; font-variant-numeric: tabular-nums;
+}
+
+/* Panel headers --------------------------------------------------------- */
+.panel-hdr {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    padding: .3rem 0 .35rem .9rem;
+    margin-bottom: .3rem;
+}
+.panel-hdr .p-title {
+    font-size: .74rem; letter-spacing: .18em;
+    text-transform: uppercase; color: #24292f; font-weight: 700;
+}
+.panel-hdr .p-sub {
+    font-size: .8rem; color: #57606a; margin-top: .22rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.panel-hdr .p-status {
+    display: flex; align-items: center; gap: .38rem;
+    font-size: .66rem; letter-spacing: .18em;
+    text-transform: uppercase; font-weight: 700;
+}
+.panel-hdr .p-dot { width: .55rem; height: .55rem; border-radius: 50%; }
+.panel-timer {
+    text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 4.1rem; font-weight: 700;
+    line-height: 1.1; letter-spacing: -.02em;
+    margin: .35rem 0 .55rem;
+    font-variant-numeric: tabular-nums;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
 
 def _init_scoreboard() -> None:
@@ -97,31 +233,86 @@ def _render_scoreboard(placeholder) -> None:
     sb = st.session_state.scoreboard
     saved = sb["elapsed_numpy"] - sb["elapsed_mkl"]
     rolling = statistics.median(sb["last_speedups"]) if sb["last_speedups"] else 0.0
-    with placeholder.container():
-        st.markdown("### Live scoreboard — this booth session")
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Rounds", f"{sb['rounds']}")
-        c2.metric("Options priced", f"{sb['options_priced']/1e6:,.1f} M")
-        c3.metric("Notional priced", _fmt_dollars(sb["notional"]))
-        c4.metric(
-            "Best speedup",
-            f"{sb['best_speedup']:.1f}×" if sb["best_speedup"] > 0 else "—",
+    best = sb["best_speedup"]
+
+    if sb["rounds"] == 0:
+        placeholder.markdown(
+            """
+<div class="scoreboard">
+  <div class="sb-head">
+    <span>Session scoreboard</span>
+    <span class="sb-pill">Awaiting first race</span>
+  </div>
+  <div class="sb-idle">
+    Hit <b>Start race</b> to run the head-to-head.
+    Toggle <b>Continuous race</b> in the sidebar for hands-off kiosk mode —
+    totals climb every round.
+  </div>
+</div>
+""",
+            unsafe_allow_html=True,
         )
-        c5.metric(
-            "Median speedup (last 5)",
-            f"{rolling:.1f}×" if rolling > 0 else "—",
+        return
+
+    total_max = max(sb["elapsed_numpy"], sb["elapsed_mkl"]) or 1.0
+    np_pct = 100.0 * sb["elapsed_numpy"] / total_max
+    mkl_pct = 100.0 * sb["elapsed_mkl"] / total_max
+
+    opt_stat = ""
+    if sb["options_priced"] > 0:
+        opt_stat = (
+            '<div>'
+            f'<div class="sb-stat-num">{sb["options_priced"] / 1e6:.1f}'
+            '<span class="sb-unit">M</span></div>'
+            '<div class="sb-stat-lbl">options priced</div>'
+            '</div>'
+            '<div>'
+            f'<div class="sb-stat-num">{_fmt_dollars(sb["notional"])}</div>'
+            '<div class="sb-stat-lbl">notional</div>'
+            '</div>'
         )
-        if sb["rounds"] > 0:
-            st.caption(
-                f"Wall-clock this session — NumPy: {sb['elapsed_numpy']:.1f} s, "
-                f"MKL: {sb['elapsed_mkl']:.1f} s  ·  "
-                f"MKL saved {saved:.1f} s of compute vs stock NumPy"
-            )
-        else:
-            st.caption(
-                "Press ▶ Start race to begin. Toggle Continuous race in the "
-                "sidebar for kiosk mode — totals climb every round."
-            )
+
+    rounds_lbl = "round" if sb["rounds"] == 1 else "rounds"
+    placeholder.markdown(
+        f"""
+<div class="scoreboard">
+  <div class="sb-head">
+    <span>Session scoreboard</span>
+    <span class="sb-pill">{sb['rounds']} {rounds_lbl}</span>
+  </div>
+  <div class="sb-row">
+    <div>
+      <div class="sb-hero-num">{rolling:.1f}<span class="sb-x">×</span></div>
+      <div class="sb-hero-lbl">median MKL speedup</div>
+    </div>
+    <div>
+      <div class="sb-stat-num">{saved:.1f}<span class="sb-unit">s</span></div>
+      <div class="sb-stat-lbl">compute saved</div>
+    </div>
+    <div>
+      <div class="sb-stat-num">{best:.1f}<span class="sb-unit">×</span></div>
+      <div class="sb-stat-lbl">peak speedup</div>
+    </div>
+    {opt_stat}
+  </div>
+  <div class="sb-bar-row">
+    <span class="sb-bar-label">stock&nbsp;NumPy</span>
+    <span class="sb-bar-track">
+      <span class="sb-bar-fill numpy" style="width:{np_pct:.1f}%"></span>
+    </span>
+    <span class="sb-bar-val">{sb['elapsed_numpy']:.1f} s</span>
+  </div>
+  <div class="sb-bar-row">
+    <span class="sb-bar-label">MKL-accel</span>
+    <span class="sb-bar-track">
+      <span class="sb-bar-fill mkl" style="width:{mkl_pct:.1f}%"></span>
+    </span>
+    <span class="sb-bar-val">{sb['elapsed_mkl']:.1f} s</span>
+  </div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 # Attribute assignment on a plain dataclass is atomic under CPython's GIL, so
@@ -140,6 +331,13 @@ class Progress:
         self.step, self.total, self.elapsed = step, total, elapsed
 
 
+_STATUS_STYLE = {
+    "idle":    ("#6a737d", "READY"),
+    "running": ("#FFB000", "RUNNING"),
+    "done":    ("#2ea043", "DONE"),
+}
+
+
 def render_panel(container, label, prog, n_paths, threads, status):
     title, subtitle, color = label
     live = status == "running" and prog.start_time is not None and not prog.done
@@ -147,12 +345,23 @@ def render_panel(container, label, prog, n_paths, threads, status):
     samples = prog.step * n_paths
     tput = samples / prog.elapsed if prog.elapsed > 0 else 0.0
 
-    container.markdown(f"### {title}")
-    container.caption(subtitle)
+    dot_color, status_txt = _STATUS_STYLE[status]
+    timer_color = "#8b949e" if status == "idle" else color
+    timer_txt = "—.—— s" if status == "idle" else f"{elapsed:6.2f} s"
+
     container.markdown(
-        f"<h1 style='text-align:center;color:{'#888' if status == 'idle' else color};"
-        f"margin:0;font-family:monospace;font-size:4rem'>"
-        f"{'—.—— s' if status == 'idle' else f'{elapsed:6.2f} s'}</h1>",
+        f"""
+<div class="panel-hdr" style="border-left:4px solid {color};">
+  <div>
+    <div class="p-title">{title}</div>
+    <div class="p-sub">{subtitle}</div>
+  </div>
+  <div class="p-status" style="color:{dot_color};">
+    <span class="p-dot" style="background:{dot_color};"></span>{status_txt}
+  </div>
+</div>
+<div class="panel-timer" style="color:{timer_color};">{timer_txt}</div>
+""",
         unsafe_allow_html=True,
     )
     if status != "idle":
@@ -197,9 +406,10 @@ workload = st.sidebar.radio(
     "Benchmark",
     ["European option pricing", "GBM path simulation"],
     help=(
-        "European option pricing mirrors the Intel oneMKL sample: "
-        "https://github.com/oneapi-src/oneMKL-samples/tree/main/monte_carlo_european_opt\n\n"
-        "GBM path simulation draws n_steps × n_paths Gaussians and produces full paths."
+        "European option pricing draws n_paths Gaussians in one batch and "
+        "prices a European call and put against the Black-Scholes closed form.\n\n"
+        "GBM path simulation draws n_steps × n_paths Gaussians and produces "
+        "full paths."
     ),
 )
 IS_OPTION = workload.startswith("European")
@@ -285,30 +495,42 @@ st.sidebar.caption(
 
 # ---------------- Main ----------------
 NUMPY_LABEL = (
-    "1. NumPy built-in RNG",
+    "Stock NumPy",
     f"numpy.random.Generator(np.random.{numpy_bg}(seed))",
     "#0068C9",
 )
 MKL_LABEL = (
-    "2. Intel oneMKL RNG",
+    "MKL-accelerated NumPy",
     f"mkl_random.RandomState(seed, brng='{mkl_brng}')",
     "#FF8C00",
 )
 
 if IS_OPTION:
-    st.title(f"How fast can this CPU price {int(n_paths):,} options?")
-    st.caption(
-        "Same math. Same seed. Same CPU. **Only the RNG differs.** "
-        "Monte Carlo prices are validated against the Black-Scholes closed form. "
-        "Mirrors the [Intel oneMKL sample]"
-        "(https://github.com/oneapi-src/oneMKL-samples/tree/main/monte_carlo_european_opt)."
+    hero_title = (
+        f"Drop-in speedup: pricing {int(n_paths):,} options with "
+        f"MKL-accelerated NumPy"
     )
 else:
-    st.title(f"How fast can this CPU simulate {int(n_paths):,} stock paths?")
-    st.caption(
-        "Identical Geometric Brownian Motion kernel. NumPy on the left, "
-        "Intel's `mkl_random` on the right. The live ticker shows elapsed seconds."
+    hero_title = (
+        f"Drop-in speedup: {int(n_paths):,} stock paths with "
+        f"MKL-accelerated NumPy"
     )
+
+st.markdown(
+    f"""
+<div class="hero">
+  <div class="hero-eyebrow">NumPy · same code · Intel oneMKL under the hood</div>
+  <div class="hero-title">{hero_title}</div>
+  <div class="hero-tagline">
+    Same script. Same seed. Same CPU. Swap <code>numpy.random</code> for
+    <code>mkl_random</code> — an <code>numpy.random.RandomState</code>-compatible
+    drop-in — and the Gaussian sampler routes through Intel oneMKL VSL.
+    No algorithm changes. Out-of-the-box speedup.
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
 scoreboard_placeholder = st.empty()
 _render_scoreboard(scoreboard_placeholder)
